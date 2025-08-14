@@ -65,5 +65,107 @@
         }
       ]
     }
+  },
+  {
+    "fields": {
+      "Role": "graduate student, DCAIC, supporting primarily AI/ML and data standards working groups",
+      "Expertise": "data analysis of high dimensional data, specifically dimensionality reduction, method development with synthetic validation, information theory",
+      "Interest": "Experimental design & data details across projects; custom softwares; analytical approaches and best practices",
+      "Note": "",
+      "Name": "Kailin Zhuang",
+      "Time": "45855.73806712963"
+    },
+    "mappings": {
+      "Role": [
+        {
+          "concept_label": "Graduate Student",
+          "ontology_id": null,
+          "ontology": null,
+          "confidence": 0.6,
+          "explanation": "Role typically found in academic and research settings."
+        },
+        {
+          "concept_label": "Artificial Intelligence",
+          "ontology_id": "Wikidata:Q11720",
+          "ontology": "Wikidata",
+          "confidence": 0.85,
+          "explanation": "Domain of study focused on creating intelligent algorithms."
+        },
+        {
+          "concept_label": "Machine Learning",
+          "ontology_id": "Wikidata:Q2539",
+          "ontology": "Wikidata",
+          "confidence": 0.85,
+          "explanation": "Field of study within AI that focuses on algorithms and statistical models."
+        },
+        {
+          "concept_label": "Data Standards",
+          "ontology_id": null,
+          "ontology": null,
+          "confidence": 0.7,
+          "explanation": "Refers to agreed-upon data formats and definitions for consistency."
+        }
+      ],
+      "Expertise": [
+        {
+          "concept_label": "Data Analysis",
+          "ontology_id": "Wikidata:Q646445",
+          "ontology": "Wikidata",
+          "confidence": 0.85,
+          "explanation": "Field involving inspecting and modeling data."
+        },
+        {
+          "concept_label": "Dimensionality Reduction",
+          "ontology_id": "Wikidata:Q295703",
+          "ontology": "Wikidata",
+          "confidence": 0.9,
+          "explanation": "Technique used in data analysis to reduce the number of variables."
+        },
+        {
+          "concept_label": "Information Theory",
+          "ontology_id": "Wikidata:Q8380",
+          "ontology": "Wikidata",
+          "confidence": 0.9,
+          "explanation": "Study of quantification, storage, and communication of information."
+        }
+      ],
+      "Interest": [
+        {
+          "concept_label": "Experimental Design",
+          "ontology_id": "Wikidata:Q29140",
+          "ontology": "Wikidata",
+          "confidence": 0.85,
+          "explanation": "Process of planning an experiment to ensure valid results."
+        },
+        {
+          "concept_label": "Software",
+          "ontology_id": "Wikidata:Q62",
+          "ontology": "Wikidata",
+          "confidence": 0.9,
+          "explanation": "Programs and other operating information used by computers."
+        },
+        {
+          "concept_label": "Data Quality",
+          "ontology_id": null,
+          "ontology": null,
+          "confidence": 0.75,
+          "explanation": "Determines the suitability and accuracy of data for use."
+        },
+        {
+          "concept_label": "Analytical Methods",
+          "ontology_id": null,
+          "ontology": null,
+          "confidence": 0.7,
+          "explanation": "Techniques and procedures used to analyze data."
+        },
+        {
+          "concept_label": "Best Practices",
+          "ontology_id": null,
+          "ontology": null,
+          "confidence": 0.65,
+          "explanation": "Recommended standards and methods based on experience."
+        }
+      ]
+    }
   }
 ]
