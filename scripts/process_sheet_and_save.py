@@ -3,11 +3,6 @@
 # DISCLAIMER: This software is provided "as is" without any warranty,
 # express or implied, including but not limited to the warranties of
 # merchantability, fitness for a particular purpose, and non-infringement.
-#
-# In no event shall the authors or copyright holders be liable for any
-# claim, damages, or other liability, whether in an action of contract,
-# tort, or otherwise, arising from, out of, or in connection with the
-# software or the use or other dealings in the software.
 # -----------------------------------------------------------------------------
 
 # @Author  : Tek Raj Chhetri
@@ -16,7 +11,7 @@
 # @File    : tests.py
 # @Software: PyCharm
 
-# !/usr/bin/env python3
+#!/usr/bin/env python3
 
 import argparse
 import csv
@@ -24,7 +19,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import requests
 from google.oauth2 import service_account
@@ -34,7 +29,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
-
 
 # ---------------- Column mapping ----------------
 def map_columns_to_labels(columns):
@@ -48,15 +42,14 @@ def map_columns_to_labels(columns):
     }
     return [mapping.get(col, col) for col in columns]
 
-
 def parse_args():
     ap = argparse.ArgumentParser(
-        description="Fetch a Google Sheet and append: mapped original to CSV; transformed to NDJSON."
+        description="Fetch a Google Sheet and append: mapped original to CSV; transformed to pretty JSON."
     )
     ap.add_argument("--spreadsheet-id", required=True)
     ap.add_argument("--sheet-name", required=True)
     ap.add_argument("--csv-out", required=True, help="Path for CSV (mapped headers, append)")
-    ap.add_argument("--json-out", required=True, help="Path for NDJSON (with mappings)")
+    ap.add_argument("--json-out", required=True, help="Path for pretty JSON array (with mappings)")
     ap.add_argument("--sa-key-file", required=True)
 
     # LLM mapping toggle: default True, but allow --no-llm-mapping to disable
@@ -75,7 +68,6 @@ def parse_args():
                     help="Sleep seconds between LLM calls (rate limiting)")
     return ap.parse_args()
 
-
 # ---------------- Google Sheets ----------------
 def get_values(spreadsheet_id, sheet_name, creds):
     service = build("sheets", "v4", credentials=creds, cache_discovery=False)
@@ -86,21 +78,9 @@ def get_values(spreadsheet_id, sheet_name, creds):
     ).execute()
     return result.get("values", []) or []
 
-
 # ---------------- Utils ----------------
 def _norm(s): return ("" if s is None else str(s)).strip()
-
-
 def _norm_key(s): return _norm(s).lower()
-
-
-def _find_header_index(headers, names):
-    targets = {_norm_key(n) for n in (names if isinstance(names, (list, tuple, set)) else [names])}
-    for i, h in enumerate(headers or []):
-        if _norm_key(h) in targets:
-            return i
-    return None
-
 
 def _existing_keys_csv(out_path):
     keys = set()
@@ -112,65 +92,57 @@ def _existing_keys_csv(out_path):
             keys.add(_norm_key(row.get("Name") or row.get("Submitted By") or ""))
     return keys
 
-
-def _existing_keys_jsonl(out_path):
-    keys = set()
+def _load_existing_json(out_path) -> List[Dict[str, Any]]:
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-        return keys
-    with open(out_path, "r", encoding="utf-8") as f:
-        for line in f:
-            try:
-                obj = json.loads(line)
-                keys.add(_norm_key(obj.get("fields", {}).get("Name") or ""))
-            except Exception:
-                continue
-    return keys
+        return []
+    try:
+        with open(out_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return []
 
+def _index_by_name(objs: List[Dict[str, Any]]):
+    idx = {}
+    for i, obj in enumerate(objs):
+        name = _norm_key(obj.get("fields", {}).get("Name", ""))
+        if name:
+            idx[name] = i
+    return idx
 
 # ---------------- OpenRouter LLM Mapping ----------------
 def _llm_system_prompt():
     prompt = """
-            You are an Ontology Mapping Assistant. Your task is to:
-            
-            1. Read the provided Role, Expertise, and Interest fields.
-            2. Identify and map each relevant word or phrase to a concept from publicly available ontologies.
-            3. For each mapped term, return the following in strict JSON format:
-            
-            {
-              "Role": [
-                {
-                  "concept_label": "...",
-                  "ontology_id": "...",
-                  "ontology": "...",
-                  "confidence": 0.0,
-                  "explanation": "..."
-                }
-              ],
-              "Expertise": [...],
-              "Interest": [...]
-            }
-            
-            Rules:
-            - concept_label — The preferred label from the ontology.
-            - ontology_id — The unique identifier (e.g., OBO, UMLS, Wikidata ID).
-            - ontology — The ontology or vocabulary source.
-            - confidence — A numeric value between 0.0 and 1.0.
-            - explanation — Brief reasoning for the mapping.
-            - If a term cannot be mapped, set all fields to null.
-            - Use only terms from public ontologies.
-            - Avoid partial matches unless they are the best available concept.
-            
-            Example:
-            For the sentence "how the human social brain develops"
-            → map "human" and "brain" to ontology concepts with their IDs, ontologies, confidence, and explanations.
-    """
+You are an Ontology Mapping Assistant. Your task is to:
+
+1) Read the provided Role, Expertise, and Interest fields.
+2) Identify and map each relevant word or phrase to a concept from publicly available ontologies.
+3) Return STRICT JSON with exactly these keys: Role, Expertise, Interest. Each key maps to a list of objects:
+   [{"concept_label": str|null, "ontology_id": str|null, "ontology": str|null, "confidence": float|null, "explanation": str|null}]
+
+Rules:
+- concept_label — preferred label from the ontology.
+- ontology_id — unique identifier (e.g., OBO, UMLS, Wikidata).
+- ontology — the source ontology/vocabulary.
+- confidence — a number in [0.0, 1.0].
+- explanation — brief reason for the mapping.
+- If a term cannot be mapped, include an object with all fields set to null OR omit it.
+- Use only public ontologies.
+- Avoid partial matches unless they are the best available concept.
+
+Example:
+Input: {"Role":"","Expertise":"","Interest":"how the human social brain develops"}
+Output: {"Role":[], "Expertise":[], "Interest":[{"concept_label":"Human","ontology_id":"Wikidata:Q5","ontology":"Wikidata","confidence":0.9,"explanation":"Human species"},{"concept_label":"Brain","ontology_id":"Wikidata:Q1073","ontology":"Wikidata","confidence":0.9,"explanation":"Organ"}]}
+"""
     return prompt
 
-
 def _llm_user_prompt(role, expertise, interest):
-    return json.dumps({"Role": role or "", "Expertise": expertise or "", "Interest": interest or ""},
-                      ensure_ascii=False)
-
+    return json.dumps(
+        {"Role": role or "", "Expertise": expertise or "", "Interest": interest or ""},
+        ensure_ascii=False
+    )
 
 def _call_openrouter(base_url, api_key, model, system_prompt, user_prompt, timeout):
     headers = {
@@ -193,7 +165,6 @@ def _call_openrouter(base_url, api_key, model, system_prompt, user_prompt, timeo
         print(f"⚠️ OpenRouter call failed: {e}")
         return None
 
-
 def get_mappings(role, expertise, interest, cfg):
     api_key = os.getenv("OPENROUTER_API_KEY")  # GitHub secret
     if not api_key:
@@ -205,11 +176,9 @@ def get_mappings(role, expertise, interest, cfg):
         _llm_user_prompt(role, expertise, interest),
         cfg["timeout"]
     )
-    # Optional pacing for rate limits
     if cfg.get("sleep_s", 0):
         time.sleep(cfg["sleep_s"])
     return res
-
 
 # ---------------- Writers ----------------
 def append_csv(values, out_path):
@@ -235,40 +204,59 @@ def append_csv(values, out_path):
                 writer.writerow(row_dict)
                 existing_keys.add(key)
 
-
-def append_jsonl(values, out_path, llm_cfg, enable_mapping):
+def write_json_pretty(values, out_path, llm_cfg, enable_mapping):
+    """
+    Writes a pretty-printed JSON array.
+    Each entry has:
+      {
+        "fields": { ...mapped headers... },
+        "mappings": { ...LLM output... }  # only if enable_mapping and available
+      }
+    De-duplicates by fields.Name (case-insensitive).
+    """
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     if not values:
+        # still ensure file exists as empty list
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
         return
 
     headers_raw = [_norm(h) for h in values[0]]
     headers_mapped = map_columns_to_labels(headers_raw)
     rows = values[1:]
 
-    existing_keys = _existing_keys_jsonl(out_path)
+    # Load existing JSON array and build index
+    existing_objs = _load_existing_json(out_path)
+    name_index = _index_by_name(existing_objs)
 
-    with open(out_path, "a", encoding="utf-8") as f:
-        for row in rows:
-            row_dict = {headers_mapped[i]: _norm(row[i]) if i < len(row) else "" for i in range(len(headers_mapped))}
-            key = _norm_key(row_dict.get("Name", ""))
-            if not key or key in existing_keys:
-                continue
+    for row in rows:
+        row_dict = {headers_mapped[i]: _norm(row[i]) if i < len(row) else "" for i in range(len(headers_mapped))}
+        key = _norm_key(row_dict.get("Name", ""))
+        if not key:
+            continue
 
-            obj = {
-                "original": row_dict,
-                "fields": row_dict.copy()
-            }
-            if enable_mapping:
-                mappings = get_mappings(
-                    row_dict.get("Role"), row_dict.get("Expertise"), row_dict.get("Interest"),
-                    llm_cfg
-                )
+        # If the record exists, update fields (and optionally mappings), else append new object
+        if key in name_index:
+            obj = existing_objs[name_index[key]]
+            # Update fields with latest values
+            obj["fields"] = row_dict
+            # Only (re)compute mappings if enabled and not present
+            if enable_mapping and not obj.get("mappings"):
+                mappings = get_mappings(row_dict.get("Role"), row_dict.get("Expertise"), row_dict.get("Interest"), llm_cfg)
                 if mappings:
                     obj["mappings"] = mappings
+        else:
+            new_obj = {"fields": row_dict}
+            if enable_mapping:
+                mappings = get_mappings(row_dict.get("Role"), row_dict.get("Expertise"), row_dict.get("Interest"), llm_cfg)
+                if mappings:
+                    new_obj["mappings"] = mappings
+            existing_objs.append(new_obj)
+            name_index[key] = len(existing_objs) - 1
 
-            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-            existing_keys.add(key)
-
+    # Write pretty JSON
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(existing_objs, f, ensure_ascii=False, indent=2)
 
 def main():
     args = parse_args()
@@ -286,8 +274,7 @@ def main():
     }
 
     append_csv(values, args.csv_out)
-    append_jsonl(values, args.json_out, llm_cfg, args.enable_llm_mapping)
-
+    write_json_pretty(values, args.json_out, llm_cfg, args.enable_llm_mapping)
 
 if __name__ == "__main__":
     main()
