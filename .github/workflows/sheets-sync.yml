@@ -11,7 +11,7 @@ on:
       actor_email:       { required: false, default: "" }
       source:            { required: false, default: "google-sheets" }
       out_format:        { required: false, default: "csv" }   # csv|json
-      out_path:          { required: false, default: "data/sheets/output.csv" }
+      out_path:          { required: false, default: "data/sheets/output_normalized.csv" }
 
 jobs:
   run-with-python:
