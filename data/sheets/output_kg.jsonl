@@ -12,11 +12,42 @@
       "Role": [],
       "Expertise": [
         {
-          "concept_label": "Reproducible Research",
-          "ontology_id": "Wikidata:Q30125612",
+          "concept_label": null,
+          "ontology_id": null,
+          "ontology": null,
+          "confidence": null,
+          "explanation": null
+        }
+      ],
+      "Interest": []
+    }
+  },
+  {
+    "fields": {
+      "Role": "graduate student, DCAIC, supporting primarily AI/ML and data standards working groups",
+      "Expertise": "data analysis of high dimensional data, specifically dimensionality reduction, method development with synthetic validation, information theory",
+      "Interest": "Experimental design & data details across projects; custom softwares; analytical approaches and best practices",
+      "Note": "",
+      "Name": "Kailin Zhuang",
+      "Time": "45855.73806712963"
+    },
+    "mappings": {
+      "Role": [
+        {
+          "concept_label": "Student",
+          "ontology_id": "Wikidata:Q3918",
           "ontology": "Wikidata",
-          "confidence": 0.85,
-          "explanation": "Concept related to research practices that ensure repeatability."
+          "confidence": 0.8,
+          "explanation": "A person who is studying in a school or other educational institution."
+        }
+      ],
+      "Expertise": [
+        {
+          "concept_label": "Information theory",
+          "ontology_id": "Wikidata:Q186921",
+          "ontology": "Wikidata",
+          "confidence": 0.95,
+          "explanation": "A branch of mathematics involving the quantification of information."
         }
       ],
       "Interest": []
