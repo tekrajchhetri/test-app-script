@@ -44,12 +44,14 @@ def map_columns_to_labels(columns):
 
 def parse_args():
     ap = argparse.ArgumentParser(
-        description="Fetch a Google Sheet and append: mapped original to CSV; transformed to pretty JSON."
+        description="Fetch a Google Sheet and append CSV; write pretty JSON and maintain a shared ontology-mapping cache."
     )
     ap.add_argument("--spreadsheet-id", required=True)
     ap.add_argument("--sheet-name", required=True)
     ap.add_argument("--csv-out", required=True, help="Path for CSV (mapped headers, append)")
-    ap.add_argument("--json-out", required=True, help="Path for pretty JSON array (with mappings)")
+    ap.add_argument("--json-out", required=True, help="Path for pretty JSON array (user entries)")
+    ap.add_argument("--mappings-store", default=None,
+                    help="Path for the shared mappings cache JSON (default: next to json-out as mappings_store.json)")
     ap.add_argument("--sa-key-file", required=True)
 
     # LLM mapping toggle: default True, but allow --no-llm-mapping to disable
@@ -112,29 +114,97 @@ def _index_by_name(objs: List[Dict[str, Any]]):
             idx[name] = i
     return idx
 
+# --------------- Shared Mappings Store (cache) ----------------
+def _default_store_path(json_out: str) -> str:
+    p = Path(json_out)
+    return str(p.with_name("mappings_store.json"))
+
+def _load_store(path: str) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        return {"Role": {}, "Expertise": {}, "Interest": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            # ensure structure
+            for k in ("Role", "Expertise", "Interest"):
+                data.setdefault(k, {})
+            return data
+    except Exception:
+        return {"Role": {}, "Expertise": {}, "Interest": {}}
+
+def _save_store(path: str, store: Dict[str, Any]) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(store, f, ensure_ascii=False, indent=2)
+
+def _merge_mapping_list(existing_list: List[Dict[str, Any]], new_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Merge by ontology_id; keep higher confidence; dedupe explanations.
+    Append brand-new ontology_ids.
+    """
+    by_id = { (m.get("ontology_id") or "", m.get("ontology") or ""): m for m in existing_list or [] }
+    for m in new_list or []:
+        key = (m.get("ontology_id") or "", m.get("ontology") or "")
+        if key in by_id:
+            cur = by_id[key]
+            # Keep the higher confidence
+            try:
+                if (m.get("confidence") or 0) > (cur.get("confidence") or 0):
+                    cur["confidence"] = m.get("confidence")
+            except Exception:
+                pass
+            # Prefer non-null concept_label
+            if not cur.get("concept_label") and m.get("concept_label"):
+                cur["concept_label"] = m.get("concept_label")
+            # Merge/shorten explanations
+            ex_set = {e.strip() for e in [cur.get("explanation", ""), m.get("explanation", "")] if e}
+            cur["explanation"] = "; ".join(sorted(ex_set)) if ex_set else None
+        else:
+            by_id[key] = {
+                "concept_label": m.get("concept_label"),
+                "ontology_id": m.get("ontology_id"),
+                "ontology": m.get("ontology"),
+                "confidence": m.get("confidence"),
+                "explanation": m.get("explanation"),
+            }
+    return list(by_id.values())
+
 # ---------------- OpenRouter LLM Mapping ----------------
 def _llm_system_prompt():
+    # NOTE: include source_term to key the shared cache
     prompt = """
-You are an Ontology Mapping Assistant. Your task is to:
+You are an Ontology Mapping Assistant.
 
-1) Read the provided Role, Expertise, and Interest fields.
-2) Identify and map each relevant word or phrase to a concept from publicly available ontologies.
-3) Return STRICT JSON with exactly these keys: Role, Expertise, Interest. Each key maps to a list of objects:
-   [{"concept_label": str|null, "ontology_id": str|null, "ontology": str|null, "confidence": float|null, "explanation": str|null}]
+TASK:
+1) Read Role, Expertise, and Interest (free-text).
+2) Identify and map each relevant word/phrase to a public-ontology concept.
+3) Return STRICT JSON with exactly keys: Role, Expertise, Interest.
+   Each is a list of objects with the schema:
+   {
+     "source_term": str,                     // the exact word/phrase you mapped
+     "concept_label": str|null,
+     "ontology_id": str|null,
+     "ontology": str|null,
+     "confidence": float|null,               // [0.0, 1.0]
+     "explanation": str|null
+   }
 
-Rules:
-- concept_label — preferred label from the ontology.
-- ontology_id — unique identifier (e.g., OBO, UMLS, Wikidata).
-- ontology — the source ontology/vocabulary.
-- confidence — a number in [0.0, 1.0].
-- explanation — brief reason for the mapping.
-- If a term cannot be mapped, include an object with all fields set to null OR omit it.
-- Use only public ontologies.
-- Avoid partial matches unless they are the best available concept.
+RULES:
+- Use only public ontologies (e.g., OBO, UMLS, Wikidata).
+- Prefer preferred labels; avoid partial matches unless clearly best.
+- If nothing maps, omit it or return a single object with all fields null (still include source_term).
+- Keep outputs compact and valid JSON.
 
-Example:
+EXAMPLE (Interest only shown for brevity):
 Input: {"Role":"","Expertise":"","Interest":"how the human social brain develops"}
-Output: {"Role":[], "Expertise":[], "Interest":[{"concept_label":"Human","ontology_id":"Wikidata:Q5","ontology":"Wikidata","confidence":0.9,"explanation":"Human species"},{"concept_label":"Brain","ontology_id":"Wikidata:Q1073","ontology":"Wikidata","confidence":0.9,"explanation":"Organ"}]}
+Output: {
+  "Role": [],
+  "Expertise": [],
+  "Interest": [
+    {"source_term":"human","concept_label":"Human","ontology_id":"Wikidata:Q5","ontology":"Wikidata","confidence":0.9,"explanation":"Human species"},
+    {"source_term":"brain","concept_label":"Brain","ontology_id":"Wikidata:Q1073","ontology":"Wikidata","confidence":0.9,"explanation":"Organ"}
+  ]
+}
 """
     return prompt
 
@@ -162,7 +232,7 @@ def _call_openrouter(base_url, api_key, model, system_prompt, user_prompt, timeo
         resp.raise_for_status()
         return json.loads(resp.json()["choices"][0]["message"]["content"])
     except Exception as e:
-        print(f"⚠️ OpenRouter call failed: {e}")
+        print(f"OpenRouter call failed: {e}")
         return None
 
 def get_mappings(role, expertise, interest, cfg):
@@ -204,19 +274,70 @@ def append_csv(values, out_path):
                 writer.writerow(row_dict)
                 existing_keys.add(key)
 
-def write_json_pretty(values, out_path, llm_cfg, enable_mapping):
+def _ensure_store_keys(store: Dict[str, Any]):
+    for k in ("Role", "Expertise", "Interest"):
+        store.setdefault(k, {})
+
+def _update_store_with_llm(store: Dict[str, Any], llm_out: Dict[str, Any]):
+    _ensure_store_keys(store)
+    for cat in ("Role", "Expertise", "Interest"):
+        items = llm_out.get(cat) or []
+        # Group by source_term
+        by_term: Dict[str, List[Dict[str, Any]]] = {}
+        for m in items:
+            term = _norm_key(m.get("source_term") or "")
+            if not term:
+                continue
+            by_term.setdefault(term, []).append({
+                "concept_label": m.get("concept_label"),
+                "ontology_id": m.get("ontology_id"),
+                "ontology": m.get("ontology"),
+                "confidence": m.get("confidence"),
+                "explanation": m.get("explanation"),
+            })
+        # Merge into store
+        for term, new_list in by_term.items():
+            existing_list = store[cat].get(term, [])
+            store[cat][term] = _merge_mapping_list(existing_list, new_list)
+
+def _snapshot_user_mappings_from_store(store: Dict[str, Any], fields: Dict[str, str]) -> Dict[str, Any]:
+    """Lookup Role/Expertise/Interest strings as whole terms in the store and return snapshot mapping lists."""
+    out = {"Role": [], "Expertise": [], "Interest": []}
+    for cat in ("Role", "Expertise", "Interest"):
+        term = _norm_key(fields.get(cat, ""))
+        if not term:
+            out[cat] = []
+            continue
+        # If the whole field isn't a key, try simple splits (fallback)
+        if term in store.get(cat, {}):
+            out[cat] = store[cat][term]
+        else:
+            # fallback heuristic: split on commas and "and"; then look up each chunk
+            aggregates: List[Dict[str, Any]] = []
+            chunks = [c.strip() for c in term.replace(" and ", ",").split(",") if c.strip()]
+            seen = set()
+            for ch in chunks:
+                lst = store.get(cat, {}).get(ch, [])
+                for m in lst:
+                    key = (m.get("ontology_id") or "", m.get("ontology") or "")
+                    if key not in seen:
+                        seen.add(key)
+                        aggregates.append(m)
+            out[cat] = aggregates
+    return out
+
+def write_json_pretty(values, out_path, store_path, llm_cfg, enable_mapping):
     """
-    Writes a pretty-printed JSON array.
-    Each entry has:
+    Writes a pretty-printed JSON array of user entries.
+    Each entry:
       {
         "fields": { ...mapped headers... },
-        "mappings": { ...LLM output... }  # only if enable_mapping and available
+        "mappings": { "Role": [...], "Expertise": [...], "Interest": [...] }  # pulled from cache; LLM only for misses
       }
     De-duplicates by fields.Name (case-insensitive).
     """
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     if not values:
-        # still ensure file exists as empty list
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump([], f, ensure_ascii=False, indent=2)
         return
@@ -225,9 +346,14 @@ def write_json_pretty(values, out_path, llm_cfg, enable_mapping):
     headers_mapped = map_columns_to_labels(headers_raw)
     rows = values[1:]
 
-    # Load existing JSON array and build index
+    # Load existing output and index
     existing_objs = _load_existing_json(out_path)
     name_index = _index_by_name(existing_objs)
+
+    # Load mapping store (shared cache)
+    if not store_path:
+        store_path = _default_store_path(out_path)
+    store = _load_store(store_path)
 
     for row in rows:
         row_dict = {headers_mapped[i]: _norm(row[i]) if i < len(row) else "" for i in range(len(headers_mapped))}
@@ -235,28 +361,35 @@ def write_json_pretty(values, out_path, llm_cfg, enable_mapping):
         if not key:
             continue
 
-        # If the record exists, update fields (and optionally mappings), else append new object
+        # Ensure an entry exists (insert or update fields)
         if key in name_index:
             obj = existing_objs[name_index[key]]
-            # Update fields with latest values
             obj["fields"] = row_dict
-            # Only (re)compute mappings if enabled and not present
-            if enable_mapping and not obj.get("mappings"):
-                mappings = get_mappings(row_dict.get("Role"), row_dict.get("Expertise"), row_dict.get("Interest"), llm_cfg)
-                if mappings:
-                    obj["mappings"] = mappings
         else:
-            new_obj = {"fields": row_dict}
-            if enable_mapping:
-                mappings = get_mappings(row_dict.get("Role"), row_dict.get("Expertise"), row_dict.get("Interest"), llm_cfg)
-                if mappings:
-                    new_obj["mappings"] = mappings
-            existing_objs.append(new_obj)
+            obj = {"fields": row_dict}
+            existing_objs.append(obj)
             name_index[key] = len(existing_objs) - 1
 
-    # Write pretty JSON
+        # Build mappings snapshot from store first
+        obj["mappings"] = _snapshot_user_mappings_from_store(store, row_dict)
+
+        # If mapping enabled, detect missing categories (no mappings found) and call LLM once to enrich store
+        if enable_mapping:
+            missing = any(len(obj["mappings"].get(cat, [])) == 0 and _norm_key(row_dict.get(cat, "")) for cat in ("Role","Expertise","Interest"))
+            if missing:
+                llm_out = get_mappings(row_dict.get("Role"), row_dict.get("Expertise"), row_dict.get("Interest"), llm_cfg)
+                if llm_out:
+                    # Update the shared store (merge; never overwrite)
+                    _update_store_with_llm(store, llm_out)
+                    # Refresh the snapshot for this user from the (now enriched) store
+                    obj["mappings"] = _snapshot_user_mappings_from_store(store, row_dict)
+
+    # Write pretty JSON for users
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(existing_objs, f, ensure_ascii=False, indent=2)
+
+    # Persist the shared mappings store
+    _save_store(store_path, store)
 
 def main():
     args = parse_args()
@@ -273,8 +406,15 @@ def main():
         "sleep_s": args.openrouter_sleep
     }
 
+    # Outputs
     append_csv(values, args.csv_out)
-    write_json_pretty(values, args.json_out, llm_cfg, args.enable_llm_mapping)
+    write_json_pretty(
+        values,
+        args.json_out,
+        args.mappings_store,
+        llm_cfg,
+        args.enable_llm_mapping
+    )
 
 if __name__ == "__main__":
     main()
