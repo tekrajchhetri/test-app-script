@@ -22,8 +22,11 @@ import argparse
 import csv
 import json
 import os
+import time
 from pathlib import Path
+from typing import Dict, Any, Optional
 
+import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -32,6 +35,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
+# ---------------- Column mapping ----------------
 def map_columns_to_labels(columns):
     mapping = {
         "What do you do?": "Role",
@@ -45,15 +49,31 @@ def map_columns_to_labels(columns):
 
 def parse_args():
     ap = argparse.ArgumentParser(
-        description="Fetch a Google Sheet tab and append to CSV/JSONL (dedupe by submitter)."
+        description="Fetch a Google Sheet and append: mapped original to CSV; transformed to NDJSON."
     )
     ap.add_argument("--spreadsheet-id", required=True)
-    ap.add_argument("--sheet-name", required=True, help="Tab name (as shown in the Google Sheet)")
-    ap.add_argument("--out-path", required=True, help="Destination file (e.g., data/sheets/output.csv or .jsonl)")
-    ap.add_argument("--out-format", default="csv", choices=["csv", "json"], help="'json' outputs JSON Lines (NDJSON)")
-    ap.add_argument("--sa-key-file", required=True, help="Path to service account JSON key")
+    ap.add_argument("--sheet-name", required=True)
+    ap.add_argument("--csv-out", required=True, help="Path for CSV (mapped headers, append)")
+    ap.add_argument("--json-out", required=True, help="Path for NDJSON (with mappings)")
+    ap.add_argument("--sa-key-file", required=True)
+
+    # LLM mapping toggle: default True, but allow --no-llm-mapping to disable
+    grp = ap.add_mutually_exclusive_group()
+    grp.add_argument("--enable-llm-mapping", dest="enable_llm_mapping", action="store_true",
+                     help="Enable ontology mapping with OpenRouter (default)")
+    grp.add_argument("--no-llm-mapping", dest="enable_llm_mapping", action="store_false",
+                     help="Disable ontology mapping with OpenRouter")
+    ap.set_defaults(enable_llm_mapping=True)
+
+    ap.add_argument("--openrouter-model", default="openai/gpt-4o-mini",
+                    help="OpenRouter model id (e.g., openai/gpt-4o-mini)")
+    ap.add_argument("--openrouter-base-url", default="https://openrouter.ai/api/v1/chat/completions")
+    ap.add_argument("--openrouter-timeout", type=int, default=60)
+    ap.add_argument("--openrouter-sleep", type=float, default=0.0,
+                    help="Sleep seconds between LLM calls (rate limiting)")
     return ap.parse_args()
 
+# ---------------- Google Sheets ----------------
 def get_values(spreadsheet_id, sheet_name, creds):
     service = build("sheets", "v4", credentials=creds, cache_discovery=False)
     result = service.spreadsheets().values().get(
@@ -63,153 +83,164 @@ def get_values(spreadsheet_id, sheet_name, creds):
     ).execute()
     return result.get("values", []) or []
 
-def _norm(s):
-    return ("" if s is None else str(s)).strip()
-
-def _norm_key(s):
-    return _norm(s).lower()
+# ---------------- Utils ----------------
+def _norm(s): return ("" if s is None else str(s)).strip()
+def _norm_key(s): return _norm(s).lower()
 
 def _find_header_index(headers, names):
-    """Find the first index of any header name (case-insensitive)."""
-    targets = { _norm_key(n) for n in (names if isinstance(names, (list,tuple,set)) else [names]) }
+    targets = {_norm_key(n) for n in (names if isinstance(names, (list, tuple, set)) else [names])}
     for i, h in enumerate(headers or []):
         if _norm_key(h) in targets:
             return i
     return None
 
-def _existing_submitter_keys_csv(out_path):
-    """Collect existing submitter keys from CSV (Name or Submitted By)."""
+def _existing_keys_csv(out_path):
     keys = set()
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         return keys
     with open(out_path, "r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        try:
-            headers = next(reader)
-        except StopIteration:
-            return keys
-        idx = _find_header_index(headers, ["Name", "Submitted By"])
-        if idx is None:
-            return keys
+        reader = csv.DictReader(f)
         for row in reader:
-            if len(row) > idx:
-                keys.add(_norm_key(row[idx]))
+            keys.add(_norm_key(row.get("Name") or row.get("Submitted By") or ""))
     return keys
 
-def _existing_submitter_keys_jsonl(out_path):
-    """Collect existing submitter keys from NDJSON (Name or Submitted By)."""
+def _existing_keys_jsonl(out_path):
     keys = set()
     if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         return keys
     with open(out_path, "r", encoding="utf-8") as f:
         for line in f:
-            line = line.strip()
-            if not line:
-                continue
             try:
                 obj = json.loads(line)
-                key = obj.get("Name") or obj.get("Submitted By") or ""
-                keys.add(_norm_key(key))
+                keys.add(_norm_key(obj.get("fields", {}).get("Name") or ""))
             except Exception:
-                # Skip malformed lines
                 continue
     return keys
 
-def write_csv_append(values, out_path):
+# ---------------- OpenRouter LLM Mapping ----------------
+def _llm_system_prompt():
+    return (
+        "You are an ontology mapping assistant. Given Role, Expertise, and Interest, "
+        "map each to an ontological concept from public ontologies (e.g., ESCO for roles, OBO/NCIT/MeSH for biomedical). "
+        "Return strict JSON with keys Role, Expertise, Interest, each containing: "
+        "{concept_label, ontology_id, ontology, confidence, explanation}. "
+        "Use nulls for fields you cannot map. confidence is 0.0–1.0."
+    )
+
+def _llm_user_prompt(role, expertise, interest):
+    return json.dumps({"Role": role or "", "Expertise": expertise or "", "Interest": interest or ""}, ensure_ascii=False)
+
+def _call_openrouter(base_url, api_key, model, system_prompt, user_prompt, timeout):
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+    }
+    try:
+        resp = requests.post(base_url, headers=headers, json=payload, timeout=timeout)
+        resp.raise_for_status()
+        return json.loads(resp.json()["choices"][0]["message"]["content"])
+    except Exception as e:
+        print(f"⚠️ OpenRouter call failed: {e}")
+        return None
+
+def get_mappings(role, expertise, interest, cfg):
+    api_key = os.getenv("OPENROUTER_API_KEY")  # GitHub secret
+    if not api_key:
+        print("ℹ️ OPENROUTER_API_KEY not set; skipping ontology mapping.")
+        return None
+    res = _call_openrouter(
+        cfg["base_url"], api_key, cfg["model"],
+        _llm_system_prompt(),
+        _llm_user_prompt(role, expertise, interest),
+        cfg["timeout"]
+    )
+    # Optional pacing for rate limits
+    if cfg.get("sleep_s", 0):
+        time.sleep(cfg["sleep_s"])
+    return res
+
+# ---------------- Writers ----------------
+def append_csv(values, out_path):
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     if not values:
-        print("No values to write.")
         return
 
-    # Map headers
-    raw_headers = [ _norm(h) for h in values[0] ]
-    headers = map_columns_to_labels(raw_headers)
+    headers_raw = [_norm(h) for h in values[0]]
+    headers_mapped = map_columns_to_labels(headers_raw)
     rows = values[1:]
 
-    # Build incoming rows aligned to mapped headers as we don't want questions
-    header_idx = { _norm_key(h): i for i, h in enumerate(headers) }
-    # Identify submitter index from original headers (pre-map) OR mapped headers
-    submitted_idx_raw = _find_header_index(raw_headers, ["Submitted By", "Name"])
-    submitted_idx_mapped = _find_header_index(headers, ["Name", "Submitted By"])
-    submitted_idx = submitted_idx_raw if submitted_idx_raw is not None else submitted_idx_mapped
+    existing_keys = _existing_keys_csv(out_path)
+    write_header = not os.path.exists(out_path) or os.path.getsize(out_path) == 0
 
-    existing_keys = _existing_submitter_keys_csv(out_path)
-
-    # Prepare to write in append mode
-    file_exists = os.path.exists(out_path)
-    is_empty = (not file_exists) or os.path.getsize(out_path) == 0
-
-    # If empty, write headers first
     with open(out_path, "a", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        if is_empty:
-            w.writerow(headers)
-
-        added, skipped = 0, 0
-        for r in rows:
-            # Build mapped row by position (pad/truncate)
-            mapped_row = []
-            for i in range(len(headers)):
-                mapped_row.append(_norm(r[i]) if i < len(r) else "")
-            # Dedup by submitter
-            key = _norm_key(r[submitted_idx]) if (submitted_idx is not None and submitted_idx < len(r)) else ""
+        writer = csv.DictWriter(f, fieldnames=headers_mapped)
+        if write_header:
+            writer.writeheader()
+        for row in rows:
+            row_dict = {headers_mapped[i]: _norm(row[i]) if i < len(row) else "" for i in range(len(headers_mapped))}
+            key = _norm_key(row_dict.get("Name", ""))
             if key and key not in existing_keys:
-                w.writerow(mapped_row)
+                writer.writerow(row_dict)
                 existing_keys.add(key)
-                added += 1
-            else:
-                skipped += 1
 
-    print(f"CSV append: {out_path} | added: {added} | skipped: {skipped}")
-
-def write_jsonl_append(values, out_path):
-    """Append as JSON Lines (NDJSON), one object per line, with mapped headers."""
+def append_jsonl(values, out_path, llm_cfg, enable_mapping):
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     if not values:
-        print("No values to write.")
         return
 
-    raw_headers = [ _norm(h) for h in values[0] ]
-    headers = map_columns_to_labels(raw_headers)
+    headers_raw = [_norm(h) for h in values[0]]
+    headers_mapped = map_columns_to_labels(headers_raw)
     rows = values[1:]
 
-    existing_keys = _existing_submitter_keys_jsonl(out_path)
+    existing_keys = _existing_keys_jsonl(out_path)
 
-    added, skipped = 0, 0
     with open(out_path, "a", encoding="utf-8") as f:
-        for r in rows:
-            obj = {}
-            for i, h in enumerate(headers):
-                key = h if h else f"col_{i+1}"
-                obj[key] = _norm(r[i]) if i < len(r) else None
-            submit_key = _norm_key(obj.get("Name") or obj.get("Submitted By") or "")
-            if submit_key and submit_key not in existing_keys:
-                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-                existing_keys.add(submit_key)
-                added += 1
-            else:
-                skipped += 1
+        for row in rows:
+            row_dict = {headers_mapped[i]: _norm(row[i]) if i < len(row) else "" for i in range(len(headers_mapped))}
+            key = _norm_key(row_dict.get("Name", ""))
+            if not key or key in existing_keys:
+                continue
 
-    print(f"JSONL append: {out_path} | added: {added} | skipped: {skipped}")
+            obj = {
+                "original": row_dict,
+                "fields": row_dict.copy()
+            }
+            if enable_mapping:
+                mappings = get_mappings(
+                    row_dict.get("Role"), row_dict.get("Expertise"), row_dict.get("Interest"),
+                    llm_cfg
+                )
+                if mappings:
+                    obj["mappings"] = mappings
+
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            existing_keys.add(key)
 
 def main():
     args = parse_args()
-
-    # Load service account credentials
     with open(args.sa_key_file, "r", encoding="utf-8") as f:
         info = json.load(f)
     creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
 
-    # Fetch data
     values = get_values(args.spreadsheet_id, args.sheet_name, creds)
 
-    # Save (append-only + dedupe by submitter)
-    fmt = args.out_format.lower()
-    if fmt == "csv":
-        write_csv_append(values, args.out_path)
-    else:
-        # 'json' means NDJSON append for true append semantics
-        write_jsonl_append(values, args.out_path)
+    llm_cfg = {
+        "model": args.openrouter_model,
+        "base_url": args.openrouter_base_url,
+        "timeout": args.openrouter_timeout,
+        "sleep_s": args.openrouter_sleep
+    }
+
+    append_csv(values, args.csv_out)
+    append_jsonl(values, args.json_out, llm_cfg, args.enable_llm_mapping)
 
 if __name__ == "__main__":
     main()
