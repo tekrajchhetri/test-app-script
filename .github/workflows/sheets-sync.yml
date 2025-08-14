@@ -58,6 +58,8 @@ jobs:
             --sheet-name "${{ github.event.inputs.sheet_name }}" \
             --out-path "${{ github.event.inputs.out_path }}" \
             --out-format "${{ github.event.inputs.out_format }}" \
+            --csv-out data/output.csv \
+            --json-out data/output.jsonl \
             --sa-key-file sa_key.json
 
       - name: Verify output exists
