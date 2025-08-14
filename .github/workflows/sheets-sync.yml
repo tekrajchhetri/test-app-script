@@ -1,0 +1,67 @@
+name: Sheets Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      sheet_name:
+        description: "Active sheet name"
+        required: false
+        default: ""
+      spreadsheet_id:
+        description: "Spreadsheet ID"
+        required: false
+        default: ""
+      spreadsheet_name:
+        description: "Spreadsheet title"
+        required: false
+        default: ""
+      change_type:
+        description: "Change type from Apps Script"
+        required: false
+        default: ""
+      edited_a1:
+        description: "Edited range (A1)"
+        required: false
+        default: ""
+      actor_email:
+        description: "User who edited"
+        required: false
+        default: ""
+      source:
+        description: "Source tag"
+        required: false
+        default: "google-sheets"
+
+jobs:
+  run-with-python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (optional)
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          fi
+
+      - name: Run handler script (args)
+        run: |
+          python scripts/handle_sheet_event.py \
+            --sheet-name "${{ github.event.inputs.sheet_name }}" \
+            --spreadsheet-id "${{ github.event.inputs.spreadsheet_id }}" \
+            --spreadsheet-name "${{ github.event.inputs.spreadsheet_name }}" \
+            --change-type "${{ github.event.inputs.change_type }}" \
+            --edited-a1 "${{ github.event.inputs.edited_a1 }}" \
+            --actor-email "${{ github.event.inputs.actor_email }}" \
+            --source "${{ github.event.inputs.source }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MY_API_KEY: ${{ secrets.MY_API_KEY }}
