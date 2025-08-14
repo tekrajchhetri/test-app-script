@@ -36,9 +36,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
 
+      # 🔐 Safe write of multiline JSON secret (no echo)
       - name: Write service account key to file
         run: |
-          echo "${{ secrets.GCP_SA_KEY }}" > sa_key.json
+          cat > sa_key.json <<'JSON'
+          ${{ secrets.GCP_SA_KEY }}
+          JSON
+
+      - name: Validate key JSON
+        run: |
+          python - <<'PY'
+          import json
+          json.load(open('sa_key.json','r',encoding='utf-8'))
+          print("✅ sa_key.json is valid JSON")
+          PY
 
       - name: Process Google Sheet → file
         run: |
