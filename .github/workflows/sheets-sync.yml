@@ -35,6 +35,10 @@ on:
 jobs:
   run-with-python:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
 
     steps:
       - name: Check out repo
