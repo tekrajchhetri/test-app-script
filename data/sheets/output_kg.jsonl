@@ -1,0 +1,69 @@
+[
+  {
+    "fields": {
+      "Role": "I work with the DCAIC Leadership team",
+      "Expertise": "methods for reproducible research",
+      "Interest": "how the human social brain develops",
+      "Note": "This is a great consortium",
+      "Name": "David Kennedy",
+      "Time": "45855.71949074074"
+    },
+    "mappings": {
+      "Role": [
+        {
+          "concept_label": "Leadership",
+          "ontology_id": "Wikidata:Q150507",
+          "ontology": "Wikidata",
+          "confidence": 0.8,
+          "explanation": "Role involving guiding and influencing a team."
+        },
+        {
+          "concept_label": "Team",
+          "ontology_id": "Wikidata:Q508648",
+          "ontology": "Wikidata",
+          "confidence": 0.7,
+          "explanation": "Group of individuals working together."
+        }
+      ],
+      "Expertise": [
+        {
+          "concept_label": "Reproducibility",
+          "ontology_id": "Wikidata:Q214087",
+          "ontology": "Wikidata",
+          "confidence": 0.9,
+          "explanation": "The ability to replicate research results."
+        },
+        {
+          "concept_label": "Research Methods",
+          "ontology_id": "Wikidata:Q47486522",
+          "ontology": "Wikidata",
+          "confidence": 0.8,
+          "explanation": "Systematic approaches to conducting research."
+        }
+      ],
+      "Interest": [
+        {
+          "concept_label": "Human",
+          "ontology_id": "Wikidata:Q5",
+          "ontology": "Wikidata",
+          "confidence": 0.9,
+          "explanation": "Human species."
+        },
+        {
+          "concept_label": "Brain",
+          "ontology_id": "Wikidata:Q1073",
+          "ontology": "Wikidata",
+          "confidence": 0.9,
+          "explanation": "Organ responsible for processing sensory information and cognition."
+        },
+        {
+          "concept_label": "Social Brain",
+          "ontology_id": "Wikidata:Q14045592",
+          "ontology": "Wikidata",
+          "confidence": 0.8,
+          "explanation": "Brain areas involved in social interactions."
+        }
+      ]
+    }
+  }
+]
