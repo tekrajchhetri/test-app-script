@@ -1,0 +1,25 @@
+[
+  {
+    "fields": {
+      "Role": "I work with the DCAIC Leadership team",
+      "Expertise": "methods for reproducible research",
+      "Interest": "how the human social brain develops",
+      "Note": "This is a great consortium",
+      "Name": "David Kennedy",
+      "Time": "45855.71949074074"
+    },
+    "mappings": {
+      "Role": [],
+      "Expertise": [
+        {
+          "concept_label": "Reproducible Research",
+          "ontology_id": "Wikidata:Q30125612",
+          "ontology": "Wikidata",
+          "confidence": 0.85,
+          "explanation": "Concept related to research practices that ensure repeatability."
+        }
+      ],
+      "Interest": []
+    }
+  }
+]
