@@ -16,7 +16,7 @@
 # @File    : tests.py
 # @Software: PyCharm
 
-#!/usr/bin/env python3
+# !/usr/bin/env python3
 
 import argparse
 import csv
@@ -35,6 +35,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
+
 # ---------------- Column mapping ----------------
 def map_columns_to_labels(columns):
     mapping = {
@@ -46,6 +47,7 @@ def map_columns_to_labels(columns):
         "Timestamp": "Time",
     }
     return [mapping.get(col, col) for col in columns]
+
 
 def parse_args():
     ap = argparse.ArgumentParser(
@@ -73,6 +75,7 @@ def parse_args():
                     help="Sleep seconds between LLM calls (rate limiting)")
     return ap.parse_args()
 
+
 # ---------------- Google Sheets ----------------
 def get_values(spreadsheet_id, sheet_name, creds):
     service = build("sheets", "v4", credentials=creds, cache_discovery=False)
@@ -83,9 +86,13 @@ def get_values(spreadsheet_id, sheet_name, creds):
     ).execute()
     return result.get("values", []) or []
 
+
 # ---------------- Utils ----------------
 def _norm(s): return ("" if s is None else str(s)).strip()
+
+
 def _norm_key(s): return _norm(s).lower()
+
 
 def _find_header_index(headers, names):
     targets = {_norm_key(n) for n in (names if isinstance(names, (list, tuple, set)) else [names])}
@@ -93,6 +100,7 @@ def _find_header_index(headers, names):
         if _norm_key(h) in targets:
             return i
     return None
+
 
 def _existing_keys_csv(out_path):
     keys = set()
@@ -103,6 +111,7 @@ def _existing_keys_csv(out_path):
         for row in reader:
             keys.add(_norm_key(row.get("Name") or row.get("Submitted By") or ""))
     return keys
+
 
 def _existing_keys_jsonl(out_path):
     keys = set()
@@ -117,18 +126,51 @@ def _existing_keys_jsonl(out_path):
                 continue
     return keys
 
+
 # ---------------- OpenRouter LLM Mapping ----------------
 def _llm_system_prompt():
-    return (
-        "You are an ontology mapping assistant. Given Role, Expertise, and Interest, "
-        "map each to an ontological concept from public ontologies (e.g., ESCO for roles, OBO/NCIT/MeSH for biomedical). "
-        "Return strict JSON with keys Role, Expertise, Interest, each containing: "
-        "{concept_label, ontology_id, ontology, confidence, explanation}. "
-        "Use nulls for fields you cannot map. confidence is 0.0–1.0."
-    )
+    prompt = """
+            You are an Ontology Mapping Assistant. Your task is to:
+            
+            1. Read the provided Role, Expertise, and Interest fields.
+            2. Identify and map each relevant word or phrase to a concept from publicly available ontologies.
+            3. For each mapped term, return the following in strict JSON format:
+            
+            {
+              "Role": [
+                {
+                  "concept_label": "...",
+                  "ontology_id": "...",
+                  "ontology": "...",
+                  "confidence": 0.0,
+                  "explanation": "..."
+                }
+              ],
+              "Expertise": [...],
+              "Interest": [...]
+            }
+            
+            Rules:
+            - concept_label — The preferred label from the ontology.
+            - ontology_id — The unique identifier (e.g., OBO, UMLS, Wikidata ID).
+            - ontology — The ontology or vocabulary source.
+            - confidence — A numeric value between 0.0 and 1.0.
+            - explanation — Brief reasoning for the mapping.
+            - If a term cannot be mapped, set all fields to null.
+            - Use only terms from public ontologies.
+            - Avoid partial matches unless they are the best available concept.
+            
+            Example:
+            For the sentence "how the human social brain develops"
+            → map "human" and "brain" to ontology concepts with their IDs, ontologies, confidence, and explanations.
+    """
+    return prompt
+
 
 def _llm_user_prompt(role, expertise, interest):
-    return json.dumps({"Role": role or "", "Expertise": expertise or "", "Interest": interest or ""}, ensure_ascii=False)
+    return json.dumps({"Role": role or "", "Expertise": expertise or "", "Interest": interest or ""},
+                      ensure_ascii=False)
+
 
 def _call_openrouter(base_url, api_key, model, system_prompt, user_prompt, timeout):
     headers = {
@@ -151,6 +193,7 @@ def _call_openrouter(base_url, api_key, model, system_prompt, user_prompt, timeo
         print(f"⚠️ OpenRouter call failed: {e}")
         return None
 
+
 def get_mappings(role, expertise, interest, cfg):
     api_key = os.getenv("OPENROUTER_API_KEY")  # GitHub secret
     if not api_key:
@@ -166,6 +209,7 @@ def get_mappings(role, expertise, interest, cfg):
     if cfg.get("sleep_s", 0):
         time.sleep(cfg["sleep_s"])
     return res
+
 
 # ---------------- Writers ----------------
 def append_csv(values, out_path):
@@ -190,6 +234,7 @@ def append_csv(values, out_path):
             if key and key not in existing_keys:
                 writer.writerow(row_dict)
                 existing_keys.add(key)
+
 
 def append_jsonl(values, out_path, llm_cfg, enable_mapping):
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -224,6 +269,7 @@ def append_jsonl(values, out_path, llm_cfg, enable_mapping):
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
             existing_keys.add(key)
 
+
 def main():
     args = parse_args()
     with open(args.sa_key_file, "r", encoding="utf-8") as f:
@@ -241,6 +287,7 @@ def main():
 
     append_csv(values, args.csv_out)
     append_jsonl(values, args.json_out, llm_cfg, args.enable_llm_mapping)
+
 
 if __name__ == "__main__":
     main()
