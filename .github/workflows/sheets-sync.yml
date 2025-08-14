@@ -10,8 +10,6 @@ on:
       edited_a1:         { required: false, default: "" }
       actor_email:       { required: false, default: "" }
       source:            { required: false, default: "google-sheets" }
-      out_format:        { required: false, default: "csv" }   # csv|json
-      out_path:          { required: false, default: "data/sheets/output_normalized.csv" }
 
 jobs:
   run-with-python:
@@ -36,7 +34,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
 
-      # 🔐 Safe write of multiline JSON secret (no echo)
+      # 🔐 Write service account key from secret
       - name: Write service account key to file
         run: |
           cat > sa_key.json <<'JSON'
@@ -51,31 +49,41 @@ jobs:
           print("✅ sa_key.json is valid JSON")
           PY
 
-      - name: Process Google Sheet → file
+      - name: Process Google Sheet → CSV + NDJSON
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # optional; enables mapping if set
         run: |
+          # Fallbacks if manual dispatch inputs are left blank
+          SHEET_ID="${{ github.event.inputs.spreadsheet_id }}"
+          SHEET_NAME="${{ github.event.inputs.sheet_name }}"
+          : "${SHEET_ID:=${{ secrets.SHEET_ID }}}"          # fallback to secret SHEET_ID if provided
+          : "${SHEET_NAME:=Form Responses}"                 # default tab name
+
           python scripts/process_sheet_and_save.py \
-            --spreadsheet-id "${{ github.event.inputs.spreadsheet_id }}" \
-            --sheet-name "${{ github.event.inputs.sheet_name }}" \
-            --out-path "${{ github.event.inputs.out_path }}" \
-            --out-format "${{ github.event.inputs.out_format }}" \
-            --csv-out data/output.csv \
-            --json-out data/output.jsonl \
+            --spreadsheet-id "${SHEET_ID}" \
+            --sheet-name "${SHEET_NAME}" \
+            --csv-out data/sheets/output_normalized.csv \
+            --json-out data/sheets/output_kg.jsonl \
             --sa-key-file sa_key.json
+            # Mapping is ON by default; to disable add: --no-llm-mapping
+            # To choose a specific model add: --openrouter-model openai/gpt-4o-mini
 
-      - name: Verify output exists
+      - name: Verify outputs exist
         run: |
-          test -f "${{ github.event.inputs.out_path }}" && echo "✅ Found ${{ github.event.inputs.out_path }}" || (echo "❌ Not found!" && exit 1)
+          test -f "data/sheets/output_normalized.csv" || (echo " CSV missing" && exit 1)
+          test -f "data/sheets/output_kg.jsonl" || (echo " NDJSON missing" && exit 1)
+          echo " Outputs present"
 
-      - name: Commit generated file
+      - name: Commit generated files
         env:
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: |
-          git add "${{ github.event.inputs.out_path }}"
+          git add data/sheets/output_normalized.csv data/sheets/output_kg.jsonl
           if ! git diff --cached --quiet; then
-            git commit -m "chore: update from Google Sheets → ${{ github.event.inputs.out_path }}"
+            git commit -m "chore: update from Google Sheets → CSV (mapped) + NDJSON (KG)"
             git push
           else
             echo "No changes to commit."
