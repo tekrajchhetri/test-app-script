@@ -26,30 +26,31 @@
     "mappings": {
       "Role": [
         {
-          "concept_label": null,
+          "concept_label": "Graduate student",
           "ontology_id": null,
           "ontology": null,
-          "confidence": null,
-          "explanation": null
+          "confidence": 0.7,
+          "explanation": "Educational status related to advanced studies."
         }
       ],
       "Expertise": [
         {
+          "concept_label": "Information theory",
+          "ontology_id": "Wikidata:Q9258",
+          "ontology": "Wikidata",
+          "confidence": 0.9,
+          "explanation": "Branch of applied mathematics and electrical engineering involving the quantification of information."
+        }
+      ],
+      "Interest": [
+        {
           "concept_label": null,
           "ontology_id": null,
           "ontology": null,
           "confidence": null,
           "explanation": null
-        },
-        {
-          "concept_label": "Information Theory",
-          "ontology_id": "Wikidata:Q10748",
-          "ontology": "Wikidata",
-          "confidence": 0.9,
-          "explanation": "The mathematical study of the transmission, processing, extraction, and utilization of information."
         }
-      ],
-      "Interest": []
+      ]
     }
   },
   {
@@ -65,84 +66,84 @@
       "Role": [
         {
           "concept_label": "Neuroinformatics",
-          "ontology_id": "Wikidata:Q482686",
+          "ontology_id": "Wikidata:Q5975",
           "ontology": "Wikidata",
-          "confidence": 0.8,
-          "explanation": "Field combining neuroscience and informatics."
+          "confidence": 0.9,
+          "explanation": "Discipline that combines neuroscience and computer science."
         },
         {
           "concept_label": "Machine learning",
           "ontology_id": "Wikidata:Q2539",
           "ontology": "Wikidata",
           "confidence": 0.9,
-          "explanation": "Field of study dealing with algorithms and statistical models."
+          "explanation": "Field of study that gives computer systems the ability to learn from data."
         },
         {
           "concept_label": "Neuroimaging",
-          "ontology_id": "Wikidata:Q474903",
+          "ontology_id": "Wikidata:Q219004",
           "ontology": "Wikidata",
-          "confidence": 0.8,
-          "explanation": "Techniques for imaging the brain."
+          "confidence": 0.9,
+          "explanation": "Use of various techniques to either directly or indirectly image the structure and function of the brain."
         },
         {
           "concept_label": "Signal processing",
-          "ontology_id": "Wikidata:Q19714",
+          "ontology_id": "Wikidata:Q173451",
           "ontology": "Wikidata",
           "confidence": 0.9,
-          "explanation": "Analysis and manipulation of signals."
+          "explanation": "Analysis, interpretation, and manipulation of signals."
         },
         {
           "concept_label": "Infrastructure",
-          "ontology_id": "Wikidata:Q41710",
+          "ontology_id": "Wikidata:Q131385",
           "ontology": "Wikidata",
           "confidence": 0.7,
-          "explanation": "Fundamental facilities and systems serving a country or city."
+          "explanation": "Fundamental facilities and systems serving a country."
         }
       ],
       "Expertise": [
         {
           "concept_label": "Signal processing",
-          "ontology_id": "Wikidata:Q19714",
+          "ontology_id": "Wikidata:Q173451",
           "ontology": "Wikidata",
           "confidence": 0.9,
-          "explanation": "Analysis and manipulation of signals."
+          "explanation": "Analysis, interpretation, and manipulation of signals."
         },
         {
           "concept_label": "Machine learning",
           "ontology_id": "Wikidata:Q2539",
           "ontology": "Wikidata",
           "confidence": 0.9,
-          "explanation": "Field of study dealing with algorithms and statistical models."
+          "explanation": "Field of study that gives computer systems the ability to learn from data."
         },
         {
           "concept_label": "Infrastructure",
-          "ontology_id": "Wikidata:Q41710",
+          "ontology_id": "Wikidata:Q131385",
           "ontology": "Wikidata",
           "confidence": 0.7,
-          "explanation": "Fundamental facilities and systems serving a country or city."
+          "explanation": "Fundamental facilities and systems serving a country."
         }
       ],
       "Interest": [
         {
           "concept_label": "Ethics",
-          "ontology_id": "Wikidata:Q11424",
+          "ontology_id": "Wikidata:Q1904",
           "ontology": "Wikidata",
           "confidence": 0.8,
-          "explanation": "Philosophical study of morality."
+          "explanation": "Philosophical study of moral values and rules."
         },
         {
           "concept_label": "Governance",
-          "ontology_id": "Wikidata:Q206399",
+          "ontology_id": "Wikidata:Q29534",
           "ontology": "Wikidata",
           "confidence": 0.8,
-          "explanation": "Processes of decision-making and the allocation of resources."
+          "explanation": "The act of governing or overseeing the control and direction of something."
         },
         {
           "concept_label": "Machine learning",
           "ontology_id": "Wikidata:Q2539",
           "ontology": "Wikidata",
           "confidence": 0.9,
-          "explanation": "Field of study dealing with algorithms and statistical models."
+          "explanation": "Field of study that gives computer systems the ability to learn from data."
         }
       ]
     }
@@ -162,15 +163,53 @@
           "concept_label": "Data Acquisition",
           "ontology_id": null,
           "ontology": null,
-          "confidence": 0.8,
-          "explanation": "General concept related to collecting or obtaining data."
+          "confidence": 0.7,
+          "explanation": "General term related to gathering data, not specific to an ontology."
         },
         {
-          "concept_label": "House Mouse",
-          "ontology_id": "Wikidata:Q147",
+          "concept_label": "Mouse",
+          "ontology_id": "Wikidata:Q328",
           "ontology": "Wikidata",
           "confidence": 0.9,
-          "explanation": "Common laboratory animal used in research."
+          "explanation": "Common laboratory animal model in research."
+        },
+        {
+          "concept_label": "Social behavior",
+          "ontology_id": "Wikidata:Q190968",
+          "ontology": "Wikidata",
+          "confidence": 0.8,
+          "explanation": "Behavior patterns exhibited by individuals in social contexts."
+        }
+      ],
+      "Expertise": [
+        {
+          "concept_label": "Neural",
+          "ontology_id": "UMLS:C0026134",
+          "ontology": "UMLS",
+          "confidence": 0.9,
+          "explanation": "Related to nerves or the nervous system."
+        }
+      ],
+      "Interest": []
+    }
+  },
+  {
+    "fields": {
+      "Role": "NIH Program Officer",
+      "Expertise": "",
+      "Interest": "",
+      "Note": "",
+      "Name": "Dana Schloesser",
+      "Time": "45856.79157407407"
+    },
+    "mappings": {
+      "Role": [
+        {
+          "concept_label": null,
+          "ontology_id": null,
+          "ontology": null,
+          "confidence": null,
+          "explanation": null
         }
       ],
       "Expertise": [],
